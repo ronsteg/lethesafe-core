@@ -38,6 +38,25 @@ source code.
 
 https://lethesafe.org
 
+## Disclaimer
+
+Lethesafe is experimental open-source software.
+
+It is provided “as is”, without any warranty of any kind, express or implied,
+including but not limited to the warranties of merchantability, fitness for a
+particular purpose, or non-infringement.
+
+The authors and contributors shall not be liable for any damages, data loss,
+or other harm arising from the use, misuse, or inability to use this software.
+
+Lethesafe is not a service, does not provide guarantees, and is not a substitute
+for backups or other safety measures. Users are solely responsible for evaluating
+the suitability of the software for their use case.
+
+No security mechanism is absolute. Lethesafe makes no claims of being
+unbreakable or immune to failure.
+
+
 ## License
 
 GNU Affero General Public License v3 (AGPLv3)
