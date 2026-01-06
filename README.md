@@ -14,17 +14,11 @@ It enforces unavoidable delay before access becomes possible.
 
 ## Documentation
 
-This repository includes copies of the Lethesafe Whitepaper and Concept
-documents for audit and reference purposes.
+The official versions of the Lethesafe Whitepaper and Concept documents are stored in the `lethesafe-core` repository under the `docs/` directory:
 
-The canonical and authoritative versions of these documents are published
-on the official project website:
+https://github.com/ronsteg/lethesafe-core/tree/main/docs
 
-https://lethesafe.org/materialien.html
-
-Copies in this repository are provided to allow reviewers and auditors
-to inspect the complete technical and conceptual context alongside the
-source code.
+These documents are provided to allow reviewers and auditors to inspect the complete technical and conceptual context alongside the source code.
 
 ## Security Model
 
