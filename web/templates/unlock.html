@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>🔓 Zeitkapsel entschlüsseln</h1>
+<p>Wähle die Zeitkapsel-Datei und gib das Passwort für den Startwert ein. Falls kein Startpasswort vergeben wurde,
+  kannst du das Feld leer lassen. Nach erfolgreichem Hashlauf erscheint die Zielzeichenkette [K].</p>
+<div class="ls-alert" id="unlock-error" hidden></div>
+<form method="post" enctype="multipart/form-data" class="ls-form" id="unlock-form">
+  <label>
+    Zeitkapsel-Datei
+    <input type="file" name="puzzle_file" accept="application/json" required />
+  </label>
+  <label>
+    Passwort
+    <input type="password" name="password" placeholder="Leer lassen, falls keines vergeben wurde." />
+  </label>
+  <button type="submit" class="ls-btn" id="unlock-submit">Entschlüsseln</button>
+</form>
+<section class="ls-progress" id="unlock-progress" hidden>
+  <div>
+    <strong>Entschlüsselung läuft …</strong>
+    <p id="unlock-progress-info">Warte auf Start.</p>
+  </div>
+  <progress id="unlock-progress-bar" value="0" max="1"></progress>
+  <div class="ls-progress__actions">
+    <button type="button" class="ls-btn ls-btn--ghost" id="unlock-cancel" hidden>Abbrechen</button>
+  </div>
+</section>
+<section class="ls-result" id="unlock-result" hidden>
+  <div id="unlock-secret-notice" class="ls-secret-notice" hidden>
+    <p>🔒 Zielzeichenkette wiederhergestellt.</p>
+    <button type="button" class="ls-btn ls-btn--alert" id="unlock-show-secret">Anzeigen</button>
+  </div>
+  <div id="unlock-secret-content" hidden>
+    <div class="ls-warning" id="unlock-warning" hidden></div>
+    <h2>🔑 Zielzeichenkette [K]</h2>
+    <textarea readonly rows="4" id="unlock-secret"></textarea>
+    <div class="ls-secret__actions">
+      <button type="button" class="ls-btn ls-btn--ghost" id="unlock-secret-copy">In die Zwischenablage</button>
+      <a class="ls-btn ls-btn--ghost" id="unlock-secret-download" href="#" target="_blank" rel="noopener">[K]
+        herunterladen</a>
+    </div>
+    {% include "_security_notice.html" %}
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}{% endblock %}

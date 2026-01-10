@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>🐑 Zeitkapsel klonen</h1>
+<p>Lade die originale Zeitkapsel-Datei hoch, gib – falls vorhanden – das zugehörige Passwort ein und lege neue Rundenzahlen fest. Du kannst den ursprünglichen Passwortschutz übernehmen, ein neues Passwort setzen oder die neuen Kapseln ohne Startpasswort erzeugen.</p>
+<div class="ls-alert" id="clone-error" hidden></div>
+<form method="post" enctype="multipart/form-data" class="ls-form" id="clone-form">
+  <label>
+    Zeitkapsel-Datei
+    <input type="file" name="puzzle_file" accept="application/json" required />
+  </label>
+  <label>
+    Ursprungspasswort
+    <input type="password" name="password" placeholder="Leer lassen, falls keines vergeben wurde." />
+  </label>
+  <fieldset class="ls-fieldset">
+    <legend>Laufdauer der neuen Kapseln</legend>
+    <label class="ls-inline">
+      <input type="radio" name="rounds_mode" id="clone-mode-time" value="time_based" checked />
+      Zeitbasiert (empfohlen)
+    </label>
+    <label class="ls-inline">
+      <input type="radio" name="rounds_mode" id="clone-mode-rounds" value="round_based" />
+      Rundenbasiert
+    </label>
+  </fieldset>
+  <div id="clone-time-section">
+    <label>
+      Wunschdauer (mehrere Zeitkapseln mit Komma trennen)
+      <input type="text" id="clone-time-input" placeholder="10m, 2h, 1d" autocomplete="off" />
+    </label>
+    <small>Einheiten: s (Sekunden), m (Minuten), h (Stunden), d (Tage). Die Kalibrierung dauert ca. 3 s.</small>
+    <div class="ls-time-controls">
+      <button type="button" class="ls-btn ls-btn--ghost" id="clone-time-calibrate">Kalibrierung starten</button>
+    </div>
+    <div class="ls-time-summary" id="clone-time-summary" hidden>
+      <p>Gewünschte Verzögerung: <strong id="clone-time-requested"></strong></p>
+      <p>Gemessene Hashrate: <strong id="clone-time-hashrate"></strong></p>
+      <p>Berechnete Rundenzahl: <strong id="clone-time-rounds"></strong></p>
+      <p>Geschätzte Laufzeit: <strong id="clone-time-runtime"></strong></p>
+      <label class="ls-inline">
+        <input type="checkbox" id="clone-time-confirm" />
+        Mit diesen Parametern klonen
+      </label>
+    </div>
+  </div>
+  <div id="clone-round-section" hidden>
+    <label>
+      Neue Runden (mehrere Zeitkapseln mit Komma trennen)
+      <input type="text" name="rounds" placeholder="5000 10000" />
+    </label>
+  </div>
+  <input type="hidden" name="time_config_token" id="clone-time-token" />
+  <label class="ls-inline">
+    <input type="checkbox" name="reuse_password" id="clone-reuse-password" checked />
+    Originalen Passwortschutz beibehalten
+  </label>
+  <div id="clone-password-options">
+    <label class="ls-inline">
+      <input type="checkbox" name="store_plain" id="clone-store-plain" />
+      Startwert ohne Passwort speichern
+    </label>
+    <label>
+      Neues Passwort (falls oben deaktiviert)
+      <input type="password" name="new_password" placeholder="Nur nötig ohne Checkbox" autocomplete="new-password" />
+    </label>
+    <label>
+      Neues Passwort bestätigen
+      <input type="password" name="new_password_confirm" placeholder="Nur nötig ohne Checkbox" autocomplete="new-password" />
+    </label>
+  </div>
+  <button type="submit" class="ls-btn" id="clone-submit">Klon erstellen</button>
+</form>
+<section class="ls-progress" id="clone-progress" hidden>
+  <div>
+    <strong>Hashkettenlauf aktiv …</strong>
+    <p id="clone-progress-info-source">Originaldatei wird ausgewertet …</p>
+    <progress id="clone-progress-bar-source" value="0" max="1"></progress>
+    <p id="clone-progress-info-new">Neue Zeitkapseln werden erzeugt …</p>
+    <progress id="clone-progress-bar-new" value="0" max="1"></progress>
+  </div>
+  <div class="ls-progress__actions">
+    <button type="button" class="ls-btn ls-btn--ghost" id="clone-cancel" hidden>Abbrechen</button>
+  </div>
+</section>
+<section class="ls-result" id="clone-result" hidden>
+  <div id="clone-secret-notice" class="ls-secret-notice" hidden>
+    <p>🔒 Zielzeichenkette und Zeitkapsel(n) erstellt.</p>
+    <button type="button" class="ls-btn ls-btn--alert" id="clone-show-secret">Anzeigen</button>
+  </div>
+  <div id="clone-secret-content" hidden>
+    <div class="ls-warning" id="clone-warning" hidden></div>
+    <h2>🔑 Zielzeichenkette [K]</h2>
+    <textarea readonly rows="4" id="clone-secret"></textarea>
+    <div class="ls-secret__actions">
+      <button type="button" class="ls-btn ls-btn--ghost" id="clone-secret-copy">In die Zwischenablage</button>
+      <a class="ls-btn ls-btn--ghost" id="clone-secret-download" href="#" target="_blank" rel="noopener">[K] herunterladen</a>
+    </div>
+    <div class="ls-secret__actions" id="clone-password-download-wrapper">
+      <a class="ls-btn ls-btn--ghost" id="clone-password-download" href="#" target="_blank" rel="noopener">Passwort-Datei herunterladen</a>
+    </div>
+    <p class="ls-hint" id="clone-password-hint" hidden>Für diese Klone wurde kein Startpasswort gesetzt.</p>
+    <div>
+      <h3>📁 Zeitkapsel-Dateien</h3>
+      <ul id="clone-files" class="ls-files"></ul>
+    </div>
+    {% include "_security_notice.html" %}
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}{% endblock %}

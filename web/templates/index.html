@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="ls-hero">
+  <h1>Lethesafe<sup style="font-size:0.55em; opacity:0.6;">&trade;</sup> Web</h1>
+  <p>Erstelle, klone oder entschlüssele Zeitkapseln komfortabel im Browser. Alle Operationen laufen lokal.</p>
+</section>
+<section class="ls-grid">
+  <article>
+    <h2>⏳ Zeitkapsel erstellen</h2>
+    <p>Frische Zielzeichenkette, eigenes Passwort und beliebige Rundenzahlen.</p>
+    <a class="ls-btn" href="{{ url_for('create_view') }}">Los geht's</a>
+  </article>
+  <article>
+    <h2>🐑 Zeitkapsel klonen</h2>
+    <p>Vorhandene Zeitkapsel-Datei hochladen und neue Runden oder Schutzparameter setzen.</p>
+    <a class="ls-btn" href="{{ url_for('clone_view') }}">Klonen</a>
+  </article>
+  <article>
+    <h2>🔓 Zeitkapsel entschlüsseln</h2>
+    <p>Löse eine Zeitkapsel nach Ablauf der Runden. Zeigt die Zielzeichenkette [K] an.</p>
+    <a class="ls-btn" href="{{ url_for('unlock_view') }}">Unlock</a>
+  </article>
+</section>
+{% endblock %}

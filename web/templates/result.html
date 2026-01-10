@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ title }}</h1>
+<p>{{ hint }}</p>
+<section class="ls-result">
+  <h2>🔑 Zielzeichenkette [K]</h2>
+  <textarea readonly rows="4">{{ secret }}</textarea>
+</section>
+<section class="ls-result">
+  <h2>📁 Dateien</h2>
+  <ul class="ls-files">
+    {% for file in files %}
+      <li>
+        {{ file.name }} – <a href="{{ url_for('download_file', token=file.token) }}">Download</a>
+      </li>
+    {% endfor %}
+    {% if password_file %}
+      <li>
+        {{ password_file.name }} – <a href="{{ url_for('download_file', token=password_file.token) }}">Download</a>
+      </li>
+    {% endif %}
+  </ul>
+</section>
+{% include "_security_notice.html" %}
+<a href="{{ url_for('index') }}" class="ls-btn">Zurück zur Übersicht</a>
+{% endblock %}

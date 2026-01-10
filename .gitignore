@@ -16,3 +16,9 @@ venv/
 
 # Runtime artefacts
 *.log
+
+# Distribution / Build
+/build/
+/dist/
+*.spec
+

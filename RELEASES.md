@@ -40,6 +40,10 @@ Prebuilt binaries are provided for convenience only.
 The authoritative reference remains the published source code and
 the documented build process.
 
+The command-line tools and the web interface are released from the
+same core codebase, but may be packaged and distributed separately.
+
+
 
 ## Hash Verification
 
@@ -75,3 +79,14 @@ documented channels are considered authentic Lethesafe releases.
 
 Users are responsible for verifying the integrity of downloaded
 artifacts before use.
+
+
+## Releases
+
+### 1.0.0 (2026-01-10)
+
+Initial public release
+
+- Core v1.0.0
+- CLI v1.0.0
+- Web v1.0.0
