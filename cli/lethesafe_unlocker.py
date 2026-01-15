@@ -25,6 +25,30 @@ from core.core_unlocker import (
 PROGRESS_ENABLED = os.environ.get("LETHESAFE_PROGRESS", "1").strip() != "0"
 
 
+def ask_yes_no(text: str, default: bool = True) -> bool:
+    hint = "[J/n]" if default else "[j/N]"
+    while True:
+        val = input(f"{text} {hint} ").strip().lower()
+        if not val:
+            return default
+        if val in ("j", "y", "yes"):
+            return True
+        if val in ("n", "no"):
+            return False
+        print("❌ Bitte j oder n eingeben.")
+
+
+def wait_for_exit():
+    while True:
+        try:
+            input("\nFertig. [ENTER] zum Beenden …")
+        except EOFError:
+            return
+        if ask_yes_no("❓ wirklich beenden? (Fenster schließt sich ggf.)", default=False):
+            return
+        print("↩️  Fenster bleibt geöffnet.")
+
+
 def format_eta(seconds: float) -> str:
     if seconds < 60:
         return f"{seconds:.1f}s"
@@ -169,7 +193,7 @@ def main():
     print("==============================================")
 
     while True:
-        raw = input("📂 Zeitkapsel-Datei: ").strip()
+        raw = input("📂 Pfad und Datei der bestehenden Zeitkapsel: ").strip()
         if not raw:
             continue
         path = Path(raw).expanduser()
@@ -185,3 +209,5 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\n🚫 Abgebrochen.")
+    else:
+        wait_for_exit()

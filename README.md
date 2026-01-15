@@ -6,19 +6,24 @@ Lethesafe is a time-lock system.
 It does not encrypt secrets.
 It enforces unavoidable delay before access becomes possible.
 
+This repository provides the cryptographic core and reference implementations
+for local use. Lethesafe does not operate any hosted service.
+
 ## Repository Scope
 
 - `core/` – cryptographic core (auditable, deterministic)
-- `cli/` – reference command-line tools
-- `web/` – optional web interface
+- `cli/` – reference command-line tools (local execution)
+- `web/` – optional local web interface
 
 ## Documentation
 
-The official versions of the Lethesafe Whitepaper and Concept documents are stored in the `lethesafe-core` repository under the `docs/` directory:
+The official Lethesafe Whitepaper and Concept documents are maintained in the
+`lethesafe-core` repository under `docs/`:
 
 https://github.com/ronsteg/lethesafe-core/tree/main/docs
 
-These documents are provided to allow reviewers and auditors to inspect the complete technical and conceptual context alongside the source code.
+They are provided to allow reviewers and auditors to inspect the complete
+technical and conceptual context alongside the source code.
 
 ## Security Model
 

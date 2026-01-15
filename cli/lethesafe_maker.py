@@ -48,6 +48,17 @@ PUZZLE_VERSION = 2
 PROGRESS_ENABLED = os.environ.get("LETHESAFE_PROGRESS", "1").strip() != "0"
 
 
+def wait_for_exit():
+    while True:
+        try:
+            input("\nFertig. [ENTER] zum Beenden …")
+        except EOFError:
+            return
+        if ask_yes_no("❓ wirklich beenden? (Fenster schließt sich ggf.)", default=False):
+            return
+        print("↩️  Fenster bleibt geöffnet.")
+
+
 def format_eta(seconds: float) -> str:
     if seconds < 60:
         return f"{seconds:.1f}s"
@@ -393,7 +404,7 @@ def read_json_file(path: Path) -> Dict[str, Any]:
 
 def load_existing_capsule() -> Tuple[Path, Dict[str, Any]]:
     while True:
-        raw = input("📂 Pfad zur bestehenden Zeitkapsel-Datei: ").strip()
+        raw = input("📂 Pfad und Datei der bestehenden Zeitkapsel: ").strip()
         if not raw:
             print("❌ Bitte einen Pfad angeben.")
             continue
@@ -755,3 +766,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n🚫 Abgebrochen durch Benutzer.")
         sys.exit(130)
+    wait_for_exit()

@@ -32,23 +32,32 @@ source .venv/bin/activate
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 ```
-Install dependencies (if required):
+Install dependencies:
 
 ```bash
-pip install -r requirements.txt
+pip install flask
 ```
-
-If no `requirements.txt` is present, the CLI uses only Python standard library modules.
 
 ## Run the Web App
 
-Start the local server:
+Start the web application from the **project root directory**
+of the Lethesafe Web package (the directory that contains
+`core/`, `web/`, and `web_core/`).
+
+
+### Linux / macOS
 
 ```bash
-python app.py
+python3 -m web.app
 ```
 
-Open your browser and navigate to:
+### Windows
+
+```bash
+python -m web.app
+```
+
+### Open your browser and navigate to:
 
 ```bash
 http://127.0.0.1:5000

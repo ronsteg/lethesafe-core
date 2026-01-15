@@ -39,17 +39,33 @@ If no `requirements.txt` is present, the CLI uses only Python standard library m
 
 ## Usage
 
-Create new time-lock capsules:
+The CLI tools must be executed using Python’s module mode (`-m`)
+from the **project root directory** of the Lethesafe CLI package
+(the directory that contains `core/` and `cli/`).
+
+### Linux / macOS
+
+```bash
+python3 -m cli.lethesafe_maker
+python3 -m cli.lethesafe_unlocker
+```
+
+### Windows
 
 ```bash
 python -m cli.lethesafe_maker
-```
-
-Unlock an existing capsule:
-
-```bash
 python -m cli.lethesafe_unlocker
 ```
+
+### Note on Python launcher names
+
+The command name (`python` vs `python3`) depends on the operating system
+and local Python installation:
+
+- On most Linux systems, Python 3 is invoked as `python3`
+- On Windows, Python 3 is typically invoked as `python`
+
+This is expected behavior and not specific to Lethesafe.
 
 ## Notes
 
@@ -58,3 +74,5 @@ All cryptographic logic resides in core/
 The CLI performs no network operations
 
 Computation time is enforced by sequential hashing
+
+The CLI is designed to be executed interactively in a terminal window.

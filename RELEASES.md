@@ -81,12 +81,21 @@ Users are responsible for verifying the integrity of downloaded
 artifacts before use.
 
 
-## Releases
+# Releases  
+## 1.0.1 (2026-01-15)
 
-### 1.0.0 (2026-01-10)
+### Changes
+- CLI v1.0.1: Prevent Windows Terminal from closing immediately
+- CLI v1.0.1: Improved user interaction and exit confirmation prompts
 
-Initial public release
+### Unchanged
+- Core v1.0.0
+- Web v1.0.0
 
+
+## 1.0.0 (2026-01-10)
+
+### Initial public release
 - Core v1.0.0
 - CLI v1.0.0
 - Web v1.0.0
