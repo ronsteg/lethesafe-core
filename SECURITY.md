@@ -48,7 +48,7 @@ Lethesafe deliberately provides:
 
 - no backdoors
 - no reset mechanisms
-- no password recovery
+- no alternative recovery mechanisms
 - no emergency access
 
 These are not missing features.
@@ -64,10 +64,12 @@ do not constitute security improvements and will be rejected by design.
 The following are not considered security issues:
 
 - inability to access secrets before the defined time has elapsed
-- intentional non-retention or deliberate destruction of secrets
-  after correct and successful generation
+- the absence of alternative recovery mechanisms
+  following deliberate non-retention of secrets
 - irreversible consequences of deliberate configuration choices
 - regret or inconvenience caused by enforced waiting periods
+- the expected failure of the unlock process
+  resulting from a modified or manipulated time capsule file
 
 Such outcomes are expected.
 
