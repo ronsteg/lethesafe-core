@@ -621,12 +621,16 @@ def api_unlock():
     raw_bytes = puzzle_file.read()
 
     # Kapseln sind JSON → capsule_payload (Mapping) an Workflow übergeben
+
     try:
-        capsule_payload = json.loads(raw_bytes.decode("utf-8"))
+        text = raw_bytes.decode("utf-8-sig")
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        capsule_payload = json.loads(text)
         if not isinstance(capsule_payload, Mapping):
             raise ValueError("Puzzle-Datei ist kein JSON-Objekt.")
     except Exception:
         return jsonify({"success": False, "error": "Ungültige Puzzle-Datei (JSON erwartet)."}), 400
+
 
     try:
         request_data = _build_unlock_request_data(capsule_payload, password or None)
@@ -682,10 +686,13 @@ def api_clone():
 
     raw_bytes = puzzle_file.read()
     try:
-        source_capsule = json.loads(raw_bytes.decode("utf-8"))
+        text = raw_bytes.decode("utf-8-sig")
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        source_capsule = json.loads(text)
         source_capsule = _ensure_clone_payload_keys(source_capsule)
     except Exception:
         return jsonify({"success": False, "error": "Ungültige Basiskapsel (JSON erwartet)."}), 400
+
 
     try:
         # Phase 0 (HTTP): nur Absicht sammeln

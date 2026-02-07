@@ -627,7 +627,24 @@
         }
         if (filesList) {
           filesList.innerHTML = payload.files
-            .map((file) => `<li>${file.name} – <a href="/download/${file.token}" target="_blank" rel="noopener">Download</a></li>`)
+            .map((file) => `
+              <li class="ls-capsule-file">
+                <img
+                  src="/static/lethesafe-symbol.svg"
+                  alt="Zeitkapsel"
+                  class="ls-capsule-icon"
+                />
+                <span class="ls-capsule-name">${file.name}</span>
+                <a
+                  href="/download/${file.token}"
+                  target="_blank"
+                  rel="noopener"
+                  class="ls-capsule-download"
+                >
+                  Download
+                </a>
+              </li>
+            `)
             .join('');
         }
 
@@ -1158,9 +1175,27 @@
         }
         if (filesList) {
           filesList.innerHTML = payload.files
-            .map((file) => `<li>${file.name} – <a href="/download/${file.token}" target="_blank" rel="noopener">Download</a></li>`)
+            .map((file) => `
+              <li class="ls-capsule-file">
+                <img
+                  src="/static/lethesafe-symbol.svg"
+                  alt="Zeitkapsel"
+                  class="ls-capsule-icon"
+                />
+                <span class="ls-capsule-name">${file.name}</span>
+                <a
+                  href="/download/${file.token}"
+                  target="_blank"
+                  rel="noopener"
+                  class="ls-capsule-download"
+                >
+                  Download
+                </a>
+              </li>
+            `)
             .join('');
         }
+        
         if (warningBox) {
           const warnings = Array.isArray(payload.warnings) ? payload.warnings.filter(Boolean) : [];
           if (warnings.length) {

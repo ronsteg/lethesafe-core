@@ -1,9 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>⏳ Zeitkapsel erstellen</h1>
-<p>Wähle eine gewünschte Laufdauer (empfohlen) oder gib explizit Rundenwerte an, füge optional Entropie (z. B. Mausbewegungen) hinzu und entscheide, ob der Startwert mit einem Passwort geschützt wird.</p>
+<p>Wähle eine gewünschte Laufdauer (empfohlen) oder gib explizit Rundenwerte an, füge optional Entropie (z. B.
+  Mausbewegungen) hinzu und entscheide, ob der Startwert mit einem Passwort geschützt wird.</p>
 <div class="ls-alert" id="create-error" hidden></div>
-<form method="post" class="ls-form" id="create-form">
+<form method="post" class="ls-form" id="create-form" autocomplete="new-password">
+
   <fieldset class="ls-fieldset">
     <legend>Laufdauer festlegen</legend>
     <label class="ls-inline">
@@ -20,7 +22,8 @@
       Wunschdauer (mehrere Zeitkapseln mit Komma trennen)
       <input type="text" id="create-time-input" placeholder="10m, 2h, 1d" autocomplete="off" />
     </label>
-    <small>Einheiten: s (Sekunden), m (Minuten), h (Stunden), d (Tage). Beispiel: 6h. Die Kalibrierung dauert ca. 3 s.</small>
+    <small>Einheiten: s (Sekunden), m (Minuten), h (Stunden), d (Tage). Beispiel: 6h. Die Kalibrierung dauert ca.
+      3 s.</small>
     <div class="ls-time-controls">
       <button type="button" class="ls-btn ls-btn--ghost" id="create-time-calibrate">Kalibrierung starten</button>
     </div>
@@ -44,7 +47,8 @@
   <input type="hidden" name="time_config_token" id="create-time-token" />
   <label class="ls-entropy">
     Optionale Zufallsquelle (nicht zwingend eforderlich)
-    <textarea name="entropy" rows="3" placeholder="Bewege die Maus zufällig oder tippe unregelmäßig…">{{ form_data.entropy|default('', true) }}</textarea>
+    <textarea name="entropy" rows="3"
+      placeholder="Bewege die Maus zufällig oder tippe unregelmäßig…">{{ form_data.entropy|default('', true) }}</textarea>
     <div class="ls-entropy__controls">
       <button type="button" id="entropy-start" class="ls-btn ls-btn--ghost">Mausaufzeichnung starten</button>
       <button type="button" id="entropy-stop" class="ls-btn ls-btn--ghost" disabled>Stopp</button>
@@ -58,12 +62,16 @@
   <div id="create-password-section">
     <label>
       Passwort für den Startwert [S]
-      <input type="password" name="password" autocomplete="new-password" />
+      <input type="password" name="password" id="create-password" autocomplete="new-password" autocapitalize="off"
+        spellcheck="false" inputmode="verbatim" />
     </label>
+
     <label>
       Passwort bestätigen
-      <input type="password" name="password_confirm" autocomplete="new-password" />
+      <input type="password" name="password_confirm" id="create-password-confirm" autocomplete="new-password"
+        autocapitalize="off" spellcheck="false" inputmode="verbatim" />
     </label>
+
   </div>
   <button type="submit" class="ls-btn" id="create-submit">Zeitkapsel erzeugen</button>
 </form>
@@ -83,86 +91,92 @@
     <button type="button" class="ls-btn ls-btn--alert" id="create-show-secret">Anzeigen</button>
   </div>
   <div id="create-secret-content" hidden>
+
+        <div class="ls-capsule">
+      <h2>📁 Zeitkapsel-Dateien</h2>
+      <p class="ls-hint">Bitte lade die Zeitkapsel-Datei(en) herunter und sichere sie, bevor du diese Seite schließt.</p>
+      <ul id="create-files" class="ls-files"></ul>
+    </div>
+
     <h2>🔑 Zielzeichenkette [K]</h2>
     <textarea readonly rows="4" id="create-secret"></textarea>
     <div class="ls-secret__actions">
       <button type="button" class="ls-btn ls-btn--ghost" id="create-secret-copy">In die Zwischenablage</button>
-      <a class="ls-btn ls-btn--ghost" id="create-secret-download" href="#" target="_blank" rel="noopener">[K] herunterladen</a>
+      <a class="ls-btn ls-btn--ghost" id="create-secret-download" href="#" target="_blank" rel="noopener">[K]
+        herunterladen</a>
     </div>
     <div class="ls-secret__actions" id="create-password-download-wrapper">
-      <a class="ls-btn ls-btn--ghost" id="create-password-download" href="#" target="_blank" rel="noopener">Passwort-Datei herunterladen</a>
+      <a class="ls-btn ls-btn--ghost" id="create-password-download" href="#" target="_blank"
+        rel="noopener">Passwort-Datei herunterladen</a>
     </div>
     <p class="ls-hint" id="create-password-hint" hidden>Für diese Zeitkapseln wurde kein Startpasswort gesetzt.</p>
-    <div>
-      <h2>📁 Zeitkapsel-Dateien</h2>
-      <ul id="create-files" class="ls-files"></ul>
-    </div>
+
     {% include "_security_notice.html" %}
   </div>
 </section>
 {% endblock %}
 {% block scripts %}
 <script>
-(() => {
-  const textarea = document.querySelector('textarea[name="entropy"]');
-  const statusEl = document.getElementById('entropy-status');
-  const startBtn = document.getElementById('entropy-start');
-  const stopBtn = document.getElementById('entropy-stop');
-  if (!textarea || !statusEl || !startBtn || !stopBtn) {
-    return;
-  }
-  const maxPoints = 200;
-  const coords = [];
-  let lastUpdate = 0;
-  let collecting = false;
-  function formatPoint(evt) {
-    const rect = document.body.getBoundingClientRect();
-    const x = Math.round(evt.clientX - rect.left);
-    const y = Math.round(evt.clientY - rect.top);
-    const timestamp = Date.now();
-    return `${timestamp}:${x},${y}`;
-  }
-  function updateTextarea() {
-    textarea.value = coords.join(' | ');
-    if (!collecting) {
-      statusEl.textContent = coords.length
-        ? `Gesammelt: ${coords.length}/${maxPoints}`
-        : 'Keine Mausdaten aufgezeichnet.';
-    } else {
-      statusEl.textContent = `Aufzeichnung läuft – ${coords.length}/${maxPoints}`;
-    }
-  }
-  function handleMove(evt) {
-    if (!collecting || coords.length >= maxPoints) {
+  (() => {
+    const textarea = document.querySelector('textarea[name="entropy"]');
+    const statusEl = document.getElementById('entropy-status');
+    const startBtn = document.getElementById('entropy-start');
+    const stopBtn = document.getElementById('entropy-stop');
+    if (!textarea || !statusEl || !startBtn || !stopBtn) {
       return;
     }
-    const now = Date.now();
-    if (now - lastUpdate < 40) {
-      return;
+    const maxPoints = 200;
+    const coords = [];
+    let lastUpdate = 0;
+    let collecting = false;
+    function formatPoint(evt) {
+      const rect = document.body.getBoundingClientRect();
+      const x = Math.round(evt.clientX - rect.left);
+      const y = Math.round(evt.clientY - rect.top);
+      const timestamp = Date.now();
+      return `${timestamp}:${x},${y}`;
     }
-    lastUpdate = now;
-    coords.push(formatPoint(evt));
-    updateTextarea();
-    if (coords.length >= maxPoints) {
+    function updateTextarea() {
+      textarea.value = coords.join(' | ');
+      if (!collecting) {
+        statusEl.textContent = coords.length
+          ? `Gesammelt: ${coords.length}/${maxPoints}`
+          : 'Keine Mausdaten aufgezeichnet.';
+      } else {
+        statusEl.textContent = `Aufzeichnung läuft – ${coords.length}/${maxPoints}`;
+      }
+    }
+    function handleMove(evt) {
+      if (!collecting || coords.length >= maxPoints) {
+        return;
+      }
+      const now = Date.now();
+      if (now - lastUpdate < 40) {
+        return;
+      }
+      lastUpdate = now;
+      coords.push(formatPoint(evt));
+      updateTextarea();
+      if (coords.length >= maxPoints) {
+        collecting = false;
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+      }
+    }
+    startBtn.addEventListener('click', () => {
+      coords.length = 0;
+      collecting = true;
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      updateTextarea();
+    });
+    stopBtn.addEventListener('click', () => {
       collecting = false;
       startBtn.disabled = false;
       stopBtn.disabled = true;
-    }
-  }
-  startBtn.addEventListener('click', () => {
-    coords.length = 0;
-    collecting = true;
-    startBtn.disabled = true;
-    stopBtn.disabled = false;
-    updateTextarea();
-  });
-  stopBtn.addEventListener('click', () => {
-    collecting = false;
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
-    updateTextarea();
-  });
-  window.addEventListener('mousemove', handleMove);
-})();
+      updateTextarea();
+    });
+    window.addEventListener('mousemove', handleMove);
+  })();
 </script>
 {% endblock %}

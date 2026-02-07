@@ -4,17 +4,23 @@
 <p>Wähle die Zeitkapsel-Datei und gib das Passwort für den Startwert ein. Falls kein Startpasswort vergeben wurde,
   kannst du das Feld leer lassen. Nach erfolgreichem Hashlauf erscheint die Zielzeichenkette [K].</p>
 <div class="ls-alert" id="unlock-error" hidden></div>
-<form method="post" enctype="multipart/form-data" class="ls-form" id="unlock-form">
+<form method="post" enctype="multipart/form-data" class="ls-form" id="unlock-form" autocomplete="new-password">
   <label>
     Zeitkapsel-Datei
-    <input type="file" name="puzzle_file" accept="application/json" required />
+    <input type="file" name="puzzle_file" accept="" required />
   </label>
+
   <label>
     Passwort
-    <input type="password" name="password" placeholder="Leer lassen, falls keines vergeben wurde." />
+    <input type="password" name="password" id="password" placeholder="Leer lassen, falls keines vergeben wurde."
+      autocomplete="new-password" autocapitalize="off" spellcheck="false" inputmode="verbatim" />
   </label>
-  <button type="submit" class="ls-btn" id="unlock-submit">Entschlüsseln</button>
+
+  <button type="submit" class="ls-btn" id="unlock-submit">
+    Entschlüsseln
+  </button>
 </form>
+
 <section class="ls-progress" id="unlock-progress" hidden>
   <div>
     <strong>Entschlüsselung läuft …</strong>

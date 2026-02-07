@@ -208,7 +208,7 @@ body {
 }
 
 .ls-files li {
-  background: linear-gradient(120deg, rgba(56, 189, 248, 0.3), rgba(59, 130, 246, 0.15));
+  background: linear-gradient(120deg, rgba(5, 12, 21, 0.75), rgba(56, 189, 248, 0.3));
   border: 1px solid rgba(56, 189, 248, 0.5);
   border-radius: 0.75rem;
   padding: 0.9rem 1.1rem;
@@ -316,4 +316,46 @@ body {
   border-color: var(--accent);
   background: var(--bg);
   color: var(--accent);
+}
+
+.ls-capsule {
+margin-bottom: 80px;
+}
+
+.ls-capsule-file {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.ls-capsule-icon {
+  width: 30px;
+  height: 30px;
+  opacity: 1;
+  flex-shrink: 0;
+}
+
+.ls-capsule-name {
+  flex-grow: 1;
+  font-weight: 500;
+}
+
+.ls-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: none;
+}
+
+.ls-brand__icon {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+}
+
+.ls-brand__text {
+  line-height: 1;
 }
