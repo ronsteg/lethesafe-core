@@ -82,6 +82,28 @@ artifacts before use.
 
 
 # Releases  
+## 1.0.2 (2026-02-07)
+
+### Changes
+
+- CLI v1.0.2:
+  - Tolerant UTF-8 parsing for capsule input (incl. BOM)
+  - Normalization of line endings before parsing
+  - Canonical JSON encoding for generated and cloned capsules
+  - Unified encoding handling across maker, clone, and unlocker
+
+- Web v1.0.1:
+  - Tolerant UTF-8 parsing for capsule input (incl. BOM)
+  - Canonical JSON encoding for generated and cloned capsules
+  - Hardened password inputs against browser and OS autofill
+  - Improved capsule download visibility and visual hierarchy
+  - Capsule symbol added to clearly identify time capsule artifacts
+  - File picker accepts all file types (content validated internally)
+
+### Unchanged
+- Core v1.0.0
+
+
 ## 1.0.1 (2026-01-15)
 
 ### Changes
