@@ -120,7 +120,9 @@ def _get_string_field(data: Dict[str, Any], *keys: str) -> str:
 
 def unlock(path: Path) -> bool:
     try:
-        data = json.loads(path.read_text())
+        text = path.read_text(encoding="utf-8-sig")
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        data = json.loads(text)
         rounds = int(data["rounds"])
         puzzle_b64 = _get_string_field(data, "puzzle", "puzzle_base64")
         puzzle = base64.b64decode(puzzle_b64)

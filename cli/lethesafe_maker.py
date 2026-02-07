@@ -233,6 +233,11 @@ def format_secret_file(rounds: Sequence[int], secret_b64: str) -> str:
     return f"Zielzeichenkette [K]:\n{secret_b64}\n"
 
 
+def write_json_canonical(path: Path, data: Dict[str, Any]) -> None:
+    text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    path.write_text(text, encoding="utf-8")
+
+
 # ─────────────────────────────────────────────
 # Hash helpers (delegated to core)
 # ─────────────────────────────────────────────
@@ -399,7 +404,9 @@ def prompt_time_based_rounds() -> Tuple[List[int], Dict[str, Any]]:
 # ─────────────────────────────────────────────
 
 def read_json_file(path: Path) -> Dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
+    text = path.read_text(encoding="utf-8-sig")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return json.loads(text)
 
 
 def load_existing_capsule() -> Tuple[Path, Dict[str, Any]]:
@@ -618,7 +625,7 @@ def main() -> None:
                 **start_value_payload,
             }
 
-            out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            write_json_canonical(out_path, payload)
             print(f"✅ Zeitkapsel-Datei gespeichert: {out_path.name}")
             written.append(out_path)
 
@@ -727,7 +734,7 @@ def main() -> None:
             **start_value_payload,
         }
 
-        out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        write_json_canonical(out_path, payload)
         print(f"✅ Zeitkapsel-Datei gespeichert: {out_path.name}")
         written.append(out_path)
 
