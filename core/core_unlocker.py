@@ -12,6 +12,9 @@ DEFAULT_PBKDF2_ITERS = 400_000
 SUPPORTED_HASH_FUNCTION = "sha256"
 SUPPORTED_KDF = "pbkdf2_hmac_sha256"
 SUPPORTED_MAC_FUNCTION = "hmac_sha256"
+EXPECTED_PUZZLE_LENGTH = 32
+EXPECTED_SALT_LENGTH = 16
+EXPECTED_NONCE_LENGTH = 16
 
 
 # ─────────────────────────────
@@ -20,6 +23,13 @@ SUPPORTED_MAC_FUNCTION = "hmac_sha256"
 
 def xor_bytes(a: bytes, b: bytes) -> bytes:
     return bytes(x ^ y for x, y in zip(a, b))
+
+
+def decode_puzzle_base64(puzzle_base64: str) -> bytes:
+    puzzle = base64.b64decode(puzzle_base64)
+    if len(puzzle) != EXPECTED_PUZZLE_LENGTH:
+        raise ValueError("Capsule corrupted or tampered")
+    return puzzle
 
 
 # ─────────────────────────────
@@ -63,9 +73,17 @@ def decrypt_start_value(
     )
     ciphertext = base64.b64decode(protected["ciphertext"])
     salt = base64.b64decode(protected["salt"])
+    if len(salt) != EXPECTED_SALT_LENGTH:
+        raise ValueError("Capsule corrupted or tampered")
     nonce = base64.b64decode(protected["nonce"])
+    if len(nonce) != EXPECTED_NONCE_LENGTH:
+        raise ValueError("Capsule corrupted or tampered")
     mac = base64.b64decode(protected["mac"])
-    iterations = int(protected.get("iterations", DEFAULT_PBKDF2_ITERS))
+    iterations = protected.get("iterations")
+    if not isinstance(iterations, int):
+        raise ValueError("Capsule corrupted or tampered")
+    if iterations <= 0:
+        raise ValueError("Capsule corrupted or tampered")
 
     key = _derive_pbkdf2_key(password, salt, iterations)
     keystream = _blake2_digest(key, PERSON_ENC, nonce, len(ciphertext))
@@ -89,6 +107,10 @@ def compute_hash_chain(start_value: bytes, rounds: int) -> bytes:
     for _ in range(rounds):
         h = hashlib.sha256(h).digest()
     return h
+
+
+def compute_secret_checksum(secret: bytes) -> bytes:
+    return hashlib.sha256(secret).digest()
 
 
 def _normalize_checksum(secret_checksum: Union[str, bytes, bytearray]) -> bytes:

@@ -8,13 +8,15 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import io
 import json
 import os
 import re
+import tempfile
 import time
 from collections import OrderedDict
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Mapping
 from uuid import uuid4
 
@@ -22,12 +24,26 @@ from flask import Flask, jsonify, redirect, render_template, request, send_file,
 
 from web.version import __version__ as WEB_VERSION
 from core.version import __version__ as CORE_VERSION
+from core.bench import measure_hashrate
+from core.core_unlocker import decode_puzzle_base64, SUPPORTED_HASH_FUNCTION
 
 import web_core.workflows as workflows_module
-from web_core.workflows import WorkflowError, workflow_clone, workflow_new, workflow_unlock
+from web_core.workflows import (
+    WorkflowError,
+    CloneSourceCapsule,
+    workflow_clone,
+    workflow_new,
+    workflow_unlock,
+)
+from common.puzzle_format import normalize_puzzle_payload, write_puzzle_v2_canonical
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024  # 32 MB Upload-Limit
+
+
+def utc_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
 
 @app.context_processor
 def inject_versions():
@@ -43,6 +59,7 @@ _TIME_CONFIG_LIMIT = 64
 _PENDING_RUN_TOKENS: dict[str, float] = {}
 _RUN_TOKEN_TTL_SECONDS = 60 * 30
 _TIME_SPEC_PATTERN = re.compile(r"\s*(\d+)\s*([smhdSMHD])\s*")
+_CAPSULE_ROUNDS_PATTERN = re.compile(r"_(\d+)r?$", re.IGNORECASE)
 
 
 # ─────────────────────────────────────────────
@@ -180,18 +197,6 @@ def _convert_time_specs_to_seconds(specs: list[str]) -> list[float]:
     return seconds
 
 
-def _measure_hashrate(duration_seconds: float = 2.5) -> float:
-    sample = os.urandom(32)
-    start = time.perf_counter()
-    end = start + max(0.5, duration_seconds)
-    iterations = 0
-    while time.perf_counter() < end:
-        sample = hashlib.sha256(sample).digest()
-        iterations += 1
-    elapsed = max(time.perf_counter() - start, 1e-9)
-    return max(iterations / elapsed, 1.0)
-
-
 def _cleanup_run_tokens() -> None:
     if not _PENDING_RUN_TOKENS:
         return
@@ -222,14 +227,92 @@ def _get_result_value(result: Mapping[str, Any], key: str, default: Any = None) 
     return result.get(key, default)
 
 
+def _merge_meta_sources(*sources: Mapping[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for source in sources:
+        if not isinstance(source, Mapping):
+            continue
+        for key, value in source.items():
+            if value is not None:
+                merged[key] = value
+    return merged
+
+
+def _render_capsule_file_bytes(core_fields: Mapping[str, Any], meta: Mapping[str, Any] | None) -> bytes:
+    fd, tmp_name = tempfile.mkstemp(prefix="lethesafe_capsule_", suffix=".json")
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        write_puzzle_v2_canonical(tmp_path, dict(core_fields), meta=dict(meta) if meta else None)
+        content = tmp_path.read_bytes()
+    finally:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+    return content
+
+
+def _canonical_capsule_files(result: Mapping[str, Any]) -> list[tuple[str, bytes]]:
+    capsules = _get_result_value(result, "capsules", []) or []
+    if not isinstance(capsules, list) or not capsules:
+        return []
+    shared_meta = _get_result_value(result, "metadata", {}) or {}
+    fallback_mode = str(_get_result_value(result, "mode", "") or "new")
+    files: list[tuple[str, bytes]] = []
+    used_names: set[str] = set()
+    for idx, raw_capsule in enumerate(capsules, start=1):
+        normalized = normalize_puzzle_payload(raw_capsule)
+        rounds_value = int(normalized["rounds"])
+        base_name = f"Zeitkapsel_{rounds_value}r"
+        filename = f"{base_name}.json"
+        suffix = 1
+        while filename in used_names:
+            suffix += 1
+            filename = f"{base_name}_{suffix}.json"
+        used_names.add(filename)
+
+        core_fields: dict[str, Any] = {
+            "mode": normalized.get("mode") or fallback_mode,
+            "rounds": rounds_value,
+            "puzzle_base64": normalized["puzzle_base64"],
+            "secret_checksum_hex": normalized["secret_checksum_hex"],
+        }
+        if "hash_function" in normalized:
+            core_fields["hash_function"] = normalized["hash_function"]
+        if "start_value_protected" in normalized:
+            core_fields["start_value_protected"] = normalized["start_value_protected"]
+        if "start_value" in normalized:
+            core_fields["start_value"] = normalized["start_value"]
+
+        capsule_meta = normalized.get("meta") if isinstance(normalized.get("meta"), Mapping) else None
+        combined_meta = _merge_meta_sources(
+            shared_meta if isinstance(shared_meta, Mapping) else {},
+            capsule_meta or {},
+            {
+                "created": utc_timestamp(),
+                "capsule_index": idx,
+                "capsule_rounds": rounds_value,
+            },
+        )
+        meta_payload = combined_meta or None
+        content = _render_capsule_file_bytes(core_fields, meta_payload)
+        files.append((filename, content))
+    return files
+
+
 def _normalize_result_files(result: Mapping[str, Any]) -> list[tuple[str, bytes]]:
     """Erwartet, dass Workflows Dateien als Liste von (name, bytes|str) liefern."""
+    canonical_files = _canonical_capsule_files(result)
+    if canonical_files:
+        return canonical_files
+
     files = _get_result_value(result, "files", []) or []
     normalized: list[tuple[str, bytes]] = []
     for item in files:
         if not isinstance(item, Mapping):
             continue
-        name = str(item.get("name", "")).strip() or "zeitkapsel.json"
+        name = str(item.get("name", "")).strip() or "Zeitkapsel.json"
         content = item.get("content", b"")
         if isinstance(content, str):
             content_b = content.encode("utf-8")
@@ -250,82 +333,94 @@ def _extract_secret_value(result: Mapping[str, Any]) -> str:
     raise ValueError("Kein Secret in Workflow-Ergebnis gefunden.")
 
 
+def _format_capsule_label(rounds_value: int) -> str:
+    return f"zeitkapsel_{rounds_value}r"
+
+
 def _derive_capsule_names(
     base_names: list[str],
     result: Mapping[str, Any],
+    rounds_hint: list[int] | None = None,
 ) -> list[str]:
-    if base_names:
-        return base_names
+    def _append_round(target: list[int], seen: set[int], value: Any) -> None:
+        try:
+            rounds_int = int(value)
+        except (TypeError, ValueError):
+            return
+        if rounds_int <= 0 or rounds_int in seen:
+            return
+        seen.add(rounds_int)
+        target.append(rounds_int)
+
+    ordered_rounds: list[int] = []
+    seen_rounds: set[int] = set()
+
+    if rounds_hint:
+        for value in rounds_hint:
+            _append_round(ordered_rounds, seen_rounds, value)
+
     capsules = _get_result_value(result, "capsules", []) or []
-    derived: list[str] = []
     for capsule in capsules:
         if not isinstance(capsule, Mapping):
             continue
-        rounds_value = capsule.get("rounds")
-        try:
-            rounds_int = int(rounds_value)
-        except (TypeError, ValueError):
-            continue
-        if rounds_int <= 0:
-            continue
-        derived.append(f"zeitkapsel_{rounds_int}")
-    return derived
+        _append_round(ordered_rounds, seen_rounds, capsule.get("rounds"))
+
+    if not ordered_rounds and base_names:
+        for name in base_names:
+            match = _CAPSULE_ROUNDS_PATTERN.search(name)
+            if match:
+                _append_round(ordered_rounds, seen_rounds, match.group(1))
+
+    if ordered_rounds:
+        return [_format_capsule_label(value) for value in ordered_rounds]
+    return list(base_names)
 
 
-def _ensure_clone_payload_keys(payload: Mapping[str, Any]) -> Mapping[str, Any]:
-    if not isinstance(payload, Mapping):
-        raise ValueError("Basiskapsel ist kein JSON-Objekt.")
-    normalized = dict(payload)
-    if "puzzle" not in normalized and "puzzle_base64" in normalized:
-        normalized["puzzle"] = normalized["puzzle_base64"]
-    if "puzzle_base64" not in normalized and "puzzle" in normalized:
-        normalized["puzzle_base64"] = normalized["puzzle"]
-    if "start_value_base64" not in normalized and "start_value" in normalized:
-        normalized["start_value_base64"] = normalized["start_value"]
-    if "secret_checksum_hex" not in normalized and "secret_checksum" in normalized:
-        normalized["secret_checksum_hex"] = normalized["secret_checksum"]
-    return normalized
+def _build_password_header(capsule_names: list[str], password: str) -> str:
+    if capsule_names:
+        return f"Passwort der {', '.join(capsule_names)} für den Startwert [S]:\n{password}\n"
+    return f"Passwort für den Startwert [S]:\n{password}\n"
 
 
-def _get_capsule_string(payload: Mapping[str, Any], *keys: str) -> str | None:
-    for key in keys:
-        value = payload.get(key)
-        if isinstance(value, str):
-            stripped = value.strip()
-            if stripped:
-                return stripped
-    return None
+def _build_secret_header(capsule_names: list[str], secret_value: str) -> str:
+    if capsule_names:
+        return f"Zielzeichenkette [K] der {', '.join(capsule_names)}:\n{secret_value}\n"
+    return f"Zielzeichenkette [K]:\n{secret_value}\n"
 
 
 def _build_unlock_request_data(payload: Mapping[str, Any], password: str | None) -> Mapping[str, Any]:
     if not isinstance(payload, Mapping):
         raise ValueError("Puzzle-Datei ist kein JSON-Objekt.")
 
+    normalized_payload = normalize_puzzle_payload(payload)
+
     try:
-        rounds_value = int(payload["rounds"])
-    except (KeyError, TypeError, ValueError) as exc:
+        rounds_value = normalized_payload["rounds"]
+    except KeyError as exc:
         raise ValueError("Puzzle-Datei enthält keine gültige Rundenzahl.") from exc
+    if not isinstance(rounds_value, int):
+        raise ValueError("Capsule corrupted or tampered")
     if rounds_value <= 0:
         raise ValueError("Puzzle-Datei enthält keine gültige Rundenzahl.")
 
-    puzzle_b64 = _get_capsule_string(payload, "puzzle_base64", "puzzle")
+    puzzle_b64 = normalized_payload.get("puzzle_base64")
     if not puzzle_b64:
         raise ValueError("Puzzle-Datei enthält keine Puzzle-Daten.")
     try:
-        puzzle_bytes = base64.b64decode(puzzle_b64)
+        puzzle_bytes = decode_puzzle_base64(puzzle_b64)
     except (TypeError, ValueError) as exc:
-        raise ValueError("Puzzle-Daten sind beschädigt.") from exc
+        raise ValueError("Capsule corrupted or tampered") from exc
 
     start_value_bytes = None
     legacy_plaintext_ignored = False
-    start_value_b64 = _get_capsule_string(payload, "start_value_base64", "start_value")
+    start_value_b64 = normalized_payload.get("start_value")
     if start_value_b64:
         try:
             start_value_bytes = base64.b64decode(start_value_b64)
         except (TypeError, ValueError) as exc:
             raise ValueError("Startwert ist beschädigt.") from exc
 
-    start_value_protected = payload.get("start_value_protected")
+    start_value_protected = normalized_payload.get("start_value_protected")
     password_protected = start_value_protected is not None
     if password_protected and start_value_bytes is not None:
         start_value_bytes = None
@@ -336,20 +431,21 @@ def _build_unlock_request_data(payload: Mapping[str, Any], password: str | None)
         raise ValueError("Protected-Startwert ist beschädigt.")
 
     secret_checksum_bytes = None
-    secret_checksum_hex = _get_capsule_string(payload, "secret_checksum_hex", "secret_checksum")
+    secret_checksum_hex = normalized_payload.get("secret_checksum_hex")
     if secret_checksum_hex:
         try:
             secret_checksum_bytes = bytes.fromhex(secret_checksum_hex)
         except (TypeError, ValueError) as exc:
             raise ValueError("Checksumme ist beschädigt.") from exc
 
-    hash_function_raw = payload.get("hash_function")
+    hash_function_raw = normalized_payload.get("hash_function")
+    hash_function: str | None = None
     if hash_function_raw is not None:
         if not isinstance(hash_function_raw, str) or not hash_function_raw.strip():
             raise ValueError("hash_function ist ungültig.")
-        hash_function = hash_function_raw.strip().lower()
-    else:
-        hash_function = "sha256"
+        hash_function = hash_function_raw.strip()
+        if hash_function != SUPPORTED_HASH_FUNCTION:
+            raise ValueError("Unsupported hash_function in capsule")
 
     request_data: dict[str, Any] = {
         "rounds": rounds_value,
@@ -363,7 +459,7 @@ def _build_unlock_request_data(payload: Mapping[str, Any], password: str | None)
         request_data["legacy_plaintext_ignored"] = True
     if secret_checksum_bytes is not None:
         request_data["secret_checksum"] = secret_checksum_bytes
-    if hash_function:
+    if hash_function is not None:
         request_data["hash_function"] = hash_function
     if password:
         request_data["password"] = password
@@ -470,8 +566,8 @@ def api_create():
     time_config_token = (request.form.get("time_config_token", "") or "").strip()
 
     protect_with_password = _as_bool(request.form.get("protect_with_password"), default=True)
-    password = (request.form.get("password", "") or "").strip()
-    password_confirm = (request.form.get("password_confirm", "") or "").strip()
+    password = (request.form.get("ls_start_password", "") or "").strip()
+    password_confirm = (request.form.get("ls_start_password_confirm", "") or "").strip()
 
     # Exports (UX)
     store_password_file = _as_bool(request.form.get("store_password_file"), default=True)
@@ -534,23 +630,17 @@ def api_create():
         files_out.append({"name": name, "token": token})
         base_names.append(name.rsplit(".", 1)[0])
 
+    capsule_names = _derive_capsule_names(base_names, result)
     password_file = None
     password_required = bool(_get_result_value(result, "password_required", False))
     if store_password_file and password_required and password:
-        if base_names:
-            header = f"Passwort der {', '.join(base_names)} für den Startwert [S]:\n{password}\n"
-        else:
-            header = f"Passwort für den Startwert [S]:\n{password}\n"
+        header = _build_password_header(capsule_names, password)
         password_file = _store_text_file("lethesafe_start-pwd.txt", header)
 
     secret_value = _extract_secret_value(result)
     secret_file = None
     if store_secret_file and secret_value:
-        capsule_names = _derive_capsule_names(base_names, result)
-        if capsule_names:
-            secret_header = f"Zielzeichenkette [K] der {', '.join(capsule_names)}:\n{secret_value}\n"
-        else:
-            secret_header = f"Zielzeichenkette [K]:\n{secret_value}\n"
+        secret_header = _build_secret_header(capsule_names, secret_value)
         secret_file = _store_text_file("lethesafe_k-key.txt", secret_header)
 
     return jsonify(
@@ -573,7 +663,7 @@ def api_create_time_calibrate():
         if not time_specs:
             raise ValueError("Bitte mindestens eine Zeitdauer angeben (z. B. 10m).")
         seconds = _convert_time_specs_to_seconds(time_specs)
-        hashrate = _measure_hashrate()
+        hashrate = measure_hashrate()
         rounds = [max(1, int(hashrate * value)) for value in seconds]
         estimated_runtime = [round_value / hashrate for round_value in rounds]
         token = _store_time_config(
@@ -608,7 +698,7 @@ def api_create_time_calibrate():
 @app.post("/api/unlock")
 def api_unlock():
     puzzle_file = request.files.get("puzzle_file")
-    password = (request.form.get("password", "") or "").strip()
+    password = (request.form.get("ls_start_password", "") or "").strip()
 
     if not puzzle_file or not puzzle_file.filename:
         return jsonify({"success": False, "error": "Bitte eine Puzzle-Datei auswählen."}), 400
@@ -645,8 +735,12 @@ def api_unlock():
         return jsonify({"success": False, "error": str(exc)}), 400
 
     warnings = list(_get_result_value(result, "warnings", []) or [])
+    capsule_round = request_data.get("rounds") if isinstance(request_data, Mapping) else None
+    rounds_hint = [capsule_round] if capsule_round is not None else None
+    capsule_names = _derive_capsule_names([], result, rounds_hint=rounds_hint)
     secret_value = _extract_secret_value(result)
-    secret_file = _store_text_file("lethesafe_k-key.txt", secret_value)
+    secret_header = _build_secret_header(capsule_names, secret_value)
+    secret_file = _store_text_file("lethesafe_k-key.txt", secret_header)
     return jsonify({"success": True, "secret": secret_value, "secret_file": secret_file, "warnings": warnings})
 
 
@@ -668,9 +762,9 @@ def api_clone():
         default=False,
     )
 
-    new_password = (request.form.get("new_password", "") or "").strip()
-    new_password_confirm = (request.form.get("new_password_confirm", "") or "").strip()
-    password = (request.form.get("password", "") or "").strip()
+    new_password = (request.form.get("ls_start_new_password", "") or "").strip()
+    new_password_confirm = (request.form.get("ls_start_new_password_confirm", "") or "").strip()
+    password = (request.form.get("ls_start_password", "") or "").strip()
 
     # Exports (UX)
     store_password_file = _as_bool(request.form.get("store_password_file"), default=True)
@@ -688,11 +782,65 @@ def api_clone():
     try:
         text = raw_bytes.decode("utf-8-sig")
         text = text.replace("\r\n", "\n").replace("\r", "\n")
-        source_capsule = json.loads(text)
-        source_capsule = _ensure_clone_payload_keys(source_capsule)
+        source_payload = json.loads(text)
+        source_normalized = normalize_puzzle_payload(source_payload)
     except Exception:
         return jsonify({"success": False, "error": "Ungültige Basiskapsel (JSON erwartet)."}), 400
 
+    try:
+        puzzle_b64 = source_normalized["puzzle_base64"]
+        source_puzzle = decode_puzzle_base64(puzzle_b64)
+        source_rounds = source_normalized["rounds"]
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"success": False, "error": "Basiskapsel ist beschädigt."}), 400
+    if not isinstance(source_rounds, int):
+        return jsonify({"success": False, "error": "Capsule corrupted or tampered"}), 400
+    if source_rounds <= 0:
+        return jsonify({"success": False, "error": "Basiskapsel enthält keine gültige Rundenzahl."}), 400
+
+    secret_checksum_hex = source_normalized.get("secret_checksum_hex")
+    if not isinstance(secret_checksum_hex, str) or not secret_checksum_hex.strip():
+        return jsonify({"success": False, "error": "Basiskapsel enthält keine Checksumme."}), 400
+    try:
+        secret_checksum_bytes = bytes.fromhex(secret_checksum_hex.strip())
+    except ValueError:
+        return jsonify({"success": False, "error": "Basiskapsel enthält eine beschädigte Checksumme."}), 400
+
+    start_value_protected = source_normalized.get("start_value_protected")
+    if start_value_protected is not None and not isinstance(start_value_protected, Mapping):
+        return jsonify({"success": False, "error": "Basiskapsel enthält einen defekten Passwortschutz."}), 400
+
+    start_value_b64 = source_normalized.get("start_value")
+    start_value_plain: bytes | None = None
+    if start_value_b64:
+        try:
+            start_value_plain = base64.b64decode(start_value_b64)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "Basiskapsel enthält einen beschädigten Startwert."}), 400
+
+    legacy_plaintext_ignored = False
+    if start_value_plain is not None and start_value_protected is not None:
+        start_value_plain = None
+        legacy_plaintext_ignored = True
+
+    hash_function = str(source_normalized.get("hash_function", "sha256") or "sha256").strip() or "sha256"
+    source_format = str(source_normalized.get("format", "lethesafe-puzzle") or "lethesafe-puzzle").strip() or "lethesafe-puzzle"
+    try:
+        source_version = int(source_normalized.get("version", 2) or 2)
+    except (TypeError, ValueError):
+        source_version = 2
+
+    source_capsule = CloneSourceCapsule(
+        rounds=source_rounds,
+        puzzle=source_puzzle,
+        secret_checksum=secret_checksum_bytes,
+        hash_function=hash_function,
+        start_value=start_value_plain,
+        start_value_protected=start_value_protected,
+        format=source_format,
+        version=source_version,
+        legacy_plaintext_ignored=legacy_plaintext_ignored,
+    )
 
     try:
         # Phase 0 (HTTP): nur Absicht sammeln
@@ -744,7 +892,7 @@ def api_clone():
 
         result = workflow_clone(
             run_token=run_token,
-            source_capsule=source_capsule,
+            source=source_capsule,
             rounds=rounds_or_time,
             reuse_password=reuse_password,
             store_plain_start_value=store_plain_start_value,
@@ -768,6 +916,7 @@ def api_clone():
         files_out.append({"name": name, "token": token})
         base_names.append(name.rsplit(".", 1)[0])
 
+    capsule_names = _derive_capsule_names(base_names, result)
     password_file = None
     password_required = bool(_get_result_value(result, "password_required", False))
 
@@ -780,20 +929,13 @@ def api_clone():
         pw_to_write = new_password.strip() if password_required else None
 
     if store_password_file and pw_to_write:
-        if base_names:
-            header = f"Passwort der {', '.join(base_names)} für den Startwert [S]:\n{pw_to_write}\n"
-        else:
-            header = f"Passwort für den Startwert [S]:\n{pw_to_write}\n"
+        header = _build_password_header(capsule_names, pw_to_write)
         password_file = _store_text_file("lethesafe_start-pwd.txt", header)
 
     secret_value = _extract_secret_value(result)
     secret_file = None
     if store_secret_file and secret_value:
-        capsule_names = _derive_capsule_names(base_names, result)
-        if capsule_names:
-            secret_header = f"Zielzeichenkette [K] der {', '.join(capsule_names)}:\n{secret_value}\n"
-        else:
-            secret_header = f"Zielzeichenkette [K]:\n{secret_value}\n"
+        secret_header = _build_secret_header(capsule_names, secret_value)
         secret_file = _store_text_file("lethesafe_k-key.txt", secret_header)
 
     return jsonify(
@@ -807,6 +949,21 @@ def api_clone():
             "warnings": warnings,
         }
     )
+
+
+# ─────────────────────────────────────────────
+# Error Handling
+# ─────────────────────────────────────────────
+
+@app.errorhandler(ValueError)
+def handle_value_error(exc: ValueError):
+    return jsonify({"error": str(exc)}), 400
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(exc: Exception):
+    app.logger.exception("Unhandled exception", exc_info=exc)
+    return jsonify({"error": "Capsule corrupted or tampered"}), 400
 
 
 # ─────────────────────────────────────────────

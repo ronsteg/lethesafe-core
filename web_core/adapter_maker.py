@@ -5,12 +5,12 @@ This module keeps all capsule assembly concerns outside the frozen core.
 
 from __future__ import annotations
 
-import hashlib
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence
 
 from core import core_maker
+from core.core_unlocker import compute_secret_checksum
 
 
 def _require_positive_rounds(value: int) -> int:
@@ -73,27 +73,28 @@ def _compute_hash_chain_iterative(
     max_chunk = max(min_chunk, int(chunk_size) if chunk_size else min_chunk)
     target_chunk = min(max_chunk, 50_000)
     current_chunk = target_chunk
-    progress_interval = 0.1  # seconds
-    abort_interval = 0.35  # seconds – cancellation may lag but still happens
+    progress_interval = 0.1
+    abort_interval = 0.35
     last_progress_time = time.perf_counter()
     last_abort_time = last_progress_time
     completed = 0
 
     while completed < rounds:
+        if abort_check:
+            now_check = time.perf_counter()
+            if now_check - last_abort_time >= abort_interval or completed == 0:
+                abort_check()
+                last_abort_time = now_check
+
         chunk_start = time.perf_counter()
-        chunk_limit = min(rounds, completed + current_chunk)
-        while completed < chunk_limit:
-            current = hashlib.sha256(current).digest()
-            completed += 1
+        step = min(rounds - completed, current_chunk)
+        current = core_maker.compute_hash_chain(current, step)
+        completed += step
         now = time.perf_counter()
 
         if progress_callback and (now - last_progress_time >= progress_interval or completed >= rounds):
             progress_callback(completed)
             last_progress_time = now
-
-        if abort_check and (now - last_abort_time >= abort_interval or completed >= rounds):
-            abort_check()
-            last_abort_time = now
 
         chunk_duration = now - chunk_start
         if chunk_duration > progress_interval * 1.5 and current_chunk > min_chunk:
@@ -116,8 +117,9 @@ def _compute_hashes_for_targets(
     if not normalized_targets:
         return {}
 
-    target_set = set(normalized_targets)
     max_target = normalized_targets[-1]
+    target_index = 0
+    pending_target = normalized_targets[target_index]
     current = start_value
     completed = 0
     min_chunk = 1024
@@ -130,22 +132,27 @@ def _compute_hashes_for_targets(
     results: Dict[int, bytes] = {}
 
     while completed < max_target:
+        if abort_check:
+            now_check = time.perf_counter()
+            if now_check - last_abort_time >= abort_interval or completed == 0:
+                abort_check()
+                last_abort_time = now_check
+
         chunk_start = time.perf_counter()
-        chunk_limit = min(max_target, completed + chunk_size)
-        while completed < chunk_limit:
-            current = hashlib.sha256(current).digest()
-            completed += 1
-            if completed in target_set:
-                results[completed] = current
+        remaining_to_target = pending_target - completed if pending_target else max_target - completed
+        step = min(chunk_size, remaining_to_target)
+        current = core_maker.compute_hash_chain(current, step)
+        completed += step
         now = time.perf_counter()
+
+        if pending_target and completed >= pending_target:
+            results[pending_target] = current
+            target_index += 1
+            pending_target = normalized_targets[target_index] if target_index < len(normalized_targets) else None
 
         if progress_callback and (now - last_progress_time >= progress_interval or completed >= max_target):
             progress_callback(completed)
             last_progress_time = now
-
-        if abort_check and (now - last_abort_time >= abort_interval or completed >= max_target):
-            abort_check()
-            last_abort_time = now
 
         chunk_duration = now - chunk_start
         if chunk_duration > progress_interval * 1.5 and chunk_size > min_chunk:
@@ -212,7 +219,7 @@ def create_capsule_web(
             chunk_size=progress_chunk_size,
         )
     puzzle = core_maker.build_puzzle(secret_k, hash_n)
-    secret_checksum = hashlib.sha256(secret_k).digest()
+    secret_checksum = compute_secret_checksum(secret_k)
 
     start_value_protected = material.start_value_protected
 
@@ -280,7 +287,7 @@ def clone_capsule_web(
     else:
         secret_k = core_maker.xor_bytes(puzzle, hash_n_source)
 
-    secret_checksum = hashlib.sha256(secret_k).digest()
+    secret_checksum = compute_secret_checksum(secret_k)
     if secret_checksum != expected_checksum:
         raise ValueError("Source capsule checksum mismatch.")
 

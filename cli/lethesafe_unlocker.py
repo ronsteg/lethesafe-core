@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from getpass import getpass
 from typing import Any, Dict
+from common.puzzle_format import normalize_puzzle_payload
 from cli.version import __version__ as CLI_VERSION
 from core.version import __version__ as CORE_VERSION
 
@@ -20,6 +21,7 @@ from core.core_unlocker import (
     decrypt_start_value,
     compute_hash_chain,
     recover_secret_k,
+    decode_puzzle_base64,
 )
 
 PROGRESS_ENABLED = os.environ.get("LETHESAFE_PROGRESS", "1").strip() != "0"
@@ -65,7 +67,8 @@ def compute_hash_chain_with_progress(
     *,
     chunk_size: int = 250_000,
 ) -> bytes:
-    rounds = int(rounds)
+    if not isinstance(rounds, int):
+        raise ValueError("Capsule corrupted or tampered")
     if rounds <= 0:
         return start_value
     if not PROGRESS_ENABLED:
@@ -122,10 +125,12 @@ def unlock(path: Path) -> bool:
     try:
         text = path.read_text(encoding="utf-8-sig")
         text = text.replace("\r\n", "\n").replace("\r", "\n")
-        data = json.loads(text)
-        rounds = int(data["rounds"])
-        puzzle_b64 = _get_string_field(data, "puzzle", "puzzle_base64")
-        puzzle = base64.b64decode(puzzle_b64)
+        data = normalize_puzzle_payload(json.loads(text))
+        rounds = data["rounds"]
+        if not isinstance(rounds, int):
+            raise ValueError("Capsule corrupted or tampered")
+        puzzle_b64 = _get_string_field(data, "puzzle_base64")
+        puzzle = decode_puzzle_base64(puzzle_b64)
     except Exception as e:
         print(f"🚫 Fehler beim Lesen: {e}")
         return False
@@ -173,19 +178,17 @@ def unlock(path: Path) -> bool:
     secret = recover_secret_k(
         puzzle,
         hash_n,
-        secret_checksum=data.get("secret_checksum") or data.get("secret_checksum_hex"),
+        secret_checksum=data.get("secret_checksum_hex"),
         hash_function=data.get("hash_function")
     )
 
+    secret_b64 = base64.b64encode(secret).decode()
     print("\n✅ Zielzeichenkette [K]:")
-    print(base64.b64encode(secret).decode())
+    print(secret_b64)
 
     out = unique_filename(path.with_name(f"lethesafe_k-key_{rounds}r.txt"))
-    timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    out.write_text(
-        base64.b64encode(secret).decode()
-        + f"\n# Generiert: {timestamp}\n"
-    )
+    header = f"Zielzeichenkette [K] der zeitkapsel_{rounds}r:\n{secret_b64}\n"
+    out.write_text(header)
     print(f"📄 Gespeichert unter: {out.name}")
     return True
 

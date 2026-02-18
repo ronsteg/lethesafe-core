@@ -818,6 +818,46 @@
       return normalized.split(/\s+/).filter(Boolean);
     };
 
+    const formatCloneEtaValue = (seconds) => {
+      if (!Number.isFinite(seconds) || seconds < 0) {
+        return '–';
+      }
+      const formatted = formatDuration(seconds);
+      if (formatted) return `~${formatted}`;
+      return `~${seconds.toFixed(1)}s`;
+    };
+
+    const updateCloneRuntimeBreakdown = () => {
+      if (!timeRuntime) return;
+      const config = ctx.timeConfig;
+      if (!config || config.rounds == null) {
+        timeRuntime.innerHTML = '';
+        return;
+      }
+      const roundsSource = Array.isArray(config.rounds) ? config.rounds : [config.rounds];
+      const numericRounds = roundsSource.map((value) => Number(value) || 0).filter((value) => value > 0);
+      const cloneMaxRound = numericRounds.length ? Math.max(...numericRounds) : 0;
+      const hashrate = Number(config.hashrate) || 0;
+      const sourceRoundsValue = Number(ctx.sourceRounds);
+      const hasSourceRounds = Number.isFinite(sourceRoundsValue) && sourceRoundsValue > 0;
+      const referenceRounds = hasSourceRounds ? sourceRoundsValue : 0;
+      const maxRound = Math.max(referenceRounds, cloneMaxRound);
+      const maxRoundLabel = maxRound > 0 ? maxRound.toLocaleString() : '–';
+      const unlockEtaSeconds = hashrate > 0 && hasSourceRounds ? referenceRounds / hashrate : null;
+      const extensionEtaSeconds =
+        hashrate > 0 && maxRound >= referenceRounds ? Math.max(0, maxRound - referenceRounds) / hashrate : null;
+      const totalEtaSeconds = hashrate > 0 && maxRound > 0 ? maxRound / hashrate : null;
+      const lines = [
+        `🔓 Reconstruction of reference capsule: <strong>${formatCloneEtaValue(unlockEtaSeconds)}</strong>`,
+        `🔁 Extension to ${maxRoundLabel} rounds: <strong>${formatCloneEtaValue(extensionEtaSeconds)}</strong>`,
+        '------------------------------------------',
+        `⏳ Total effective runtime: <strong>${formatCloneEtaValue(totalEtaSeconds)}</strong>`,
+      ];
+      timeRuntime.innerHTML = lines
+        .map((text, idx) => `<p${idx === 2 ? ' aria-hidden="true"' : ''}>${text}</p>`)
+        .join('');
+    };
+
     const runCloneTimeCalibration = async () => {
       if (ctx.mode !== 'time_based') {
         return;
@@ -912,16 +952,7 @@
         if (timeRounds) {
           timeRounds.textContent = roundsArray.map((value) => value.toLocaleString()).join(', ');
         }
-        if (timeRuntime) {
-          const runtimeText = estimatedRuntimeArray
-            .map((value) => {
-              const numeric = Number(value) || 0;
-              const formatted = formatDuration(numeric);
-              return formatted ? `~${formatted}` : `${numeric.toFixed(1)}s`;
-            })
-            .join(', ');
-          timeRuntime.textContent = runtimeText;
-        }
+        updateCloneRuntimeBreakdown();
         if (timeSummary) timeSummary.hidden = false;
         if (timeConfirm) {
           timeConfirm.checked = false;
@@ -1011,7 +1042,11 @@
       } else {
         progressBarSource.value = 1;
       }
-      if (newTotal > 0) {
+      const maxRound = Math.max(sourceTotal, newTotal);
+      const globalCompleted = maxRound > 0 ? Math.min(completed, maxRound) : 0;
+      if (maxRound > 0) {
+        progressBarNew.value = Math.max(0, Math.min(1, globalCompleted / maxRound));
+      } else if (newTotal > 0) {
         progressBarNew.value = Math.max(0, Math.min(1, newCompleted / newTotal));
       }
       progressInfoSource.textContent = sourceTotal
@@ -1020,6 +1055,9 @@
       let newText = newTotal
         ? `Neue Zeitkapseln: ${newCompleted.toLocaleString()} / ${newTotal.toLocaleString()} Runden`
         : 'Neue Zeitkapseln: keine Fortschrittsdaten';
+      if (maxRound > 0) {
+        newText = `${newText} – Gesamt: ${globalCompleted.toLocaleString()} / ${maxRound.toLocaleString()} Runden`;
+      }
       if (elapsed > 0 && completed > 0 && ctx.etaTracker && ctx.totalRounds) {
         const eta = ctx.etaTracker(completed, elapsed);
         if (eta) {
@@ -1079,8 +1117,15 @@
           } catch (_) {
             ctx.sourceRounds = null;
           }
+          updateCloneRuntimeBreakdown();
+        };
+        reader.onerror = () => {
+          ctx.sourceRounds = null;
+          updateCloneRuntimeBreakdown();
         };
         reader.readAsText(file);
+      } else {
+        updateCloneRuntimeBreakdown();
       }
     });
 
@@ -1131,7 +1176,8 @@
         formData.set('time_config_token', '');
         ctx.targetRounds = extractMaxRounds(formData.get('rounds'));
       }
-      const totalRounds = (ctx.sourceRounds || 0) + (ctx.targetRounds || 0);
+      const sourceRoundsValue = Number(ctx.sourceRounds) || 0;
+      const totalRounds = Math.max(sourceRoundsValue, ctx.targetRounds || 0);
 
       disableForm(true);
       try {

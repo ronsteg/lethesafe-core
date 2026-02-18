@@ -8,19 +8,20 @@ signals and triggers the canonical core once the environment is ready.
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
-import os
 import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from core import core_maker
+from core.bench import measure_hashrate
 from core.core_unlocker import (
     compute_hash_chain,
     decrypt_start_value,
     recover_secret_k,
+    compute_secret_checksum,
+    decode_puzzle_base64,
 )
 from web.state import abort_manager, progress_tracker
 from web_core.adapter_maker import (
@@ -55,15 +56,7 @@ def _calibrate_hashrate(duration_seconds: float = 2.5) -> float:
     if duration <= 0:
         raise WorkflowError("Calibration duration must be positive.")
 
-    start = time.perf_counter()
-    end = start + max(0.5, duration)
-    iterations = 0
-    seed = os.urandom(32)
-    while time.perf_counter() < end:
-        seed = hashlib.sha256(seed).digest()
-        iterations += 1
-    elapsed = max(time.perf_counter() - start, 1e-9)
-    return iterations / elapsed
+    return measure_hashrate(duration)
 
 
 def _hash_chain_with_progress(
@@ -93,10 +86,9 @@ def _hash_chain_with_progress(
     while completed < rounds:
         ensure_not_cancelled(run_token)
         chunk_start = time.perf_counter()
-        chunk_limit = min(rounds, completed + chunk_size)
-        while completed < chunk_limit:
-            current = hashlib.sha256(current).digest()
-            completed += 1
+        step = min(chunk_size, rounds - completed)
+        current = compute_hash_chain(current, step)
+        completed += step
         now = time.perf_counter()
 
         if now - last_progress_ts >= progress_interval or completed >= rounds:
@@ -270,9 +262,22 @@ class NewWorkflowDecisions:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class CloneSourceCapsule:
+    rounds: int
+    puzzle: bytes
+    secret_checksum: bytes
+    hash_function: str
+    start_value: Optional[bytes]
+    start_value_protected: Optional[Mapping[str, Any]]
+    format: str = "lethesafe-puzzle"
+    version: int = core_maker.PUZZLE_VERSION
+    legacy_plaintext_ignored: bool = False
+
+
 @dataclass
 class CloneWorkflowDecisions:
-    source_capsule: Mapping[str, Any]
+    source: CloneSourceCapsule
     rounds: List[int]
     reuse_password: bool
     store_plain_start_value: bool
@@ -415,7 +420,7 @@ def workflow_new(
 def workflow_clone(
     *,
     run_token: str,
-    source_capsule: Mapping[str, Any],
+    source: CloneSourceCapsule,
     rounds: Sequence[Any],
     reuse_password: bool,
     store_plain_start_value: bool,
@@ -428,10 +433,12 @@ def workflow_clone(
     metadata_payload: Mapping[str, Any] = metadata or {}
     # Phase 1 – Entscheidungsphase (bereits finalisiert, kein Re-Entry)
     final_rounds = _resolve_rounds(None, rounds, None)
-    if not isinstance(source_capsule, Mapping):
-        raise WorkflowError("Source capsule payload must be a mapping.")
-    if "puzzle" not in source_capsule or "rounds" not in source_capsule:
-        raise WorkflowError("Source capsule payload must contain 'puzzle' and 'rounds'.")
+    if not isinstance(source.puzzle, (bytes, bytearray)):
+        raise WorkflowError("Source capsule must provide puzzle bytes.")
+    if source.secret_checksum is None:
+        raise WorkflowError("Source capsule requires a secret checksum.")
+    if source.rounds <= 0:
+        raise WorkflowError("Source capsule must contain a positive round count.")
 
     if reuse_password and store_plain_start_value:
         raise WorkflowError("Cannot reuse the original password and store the start value unprotected.")
@@ -439,7 +446,7 @@ def workflow_clone(
         raise WorkflowError("A new password must be provided when no protection is inherited.")
 
     decisions = CloneWorkflowDecisions(
-        source_capsule=source_capsule,
+        source=source,
         rounds=final_rounds,
         reuse_password=reuse_password,
         store_plain_start_value=store_plain_start_value,
@@ -451,13 +458,12 @@ def workflow_clone(
     # Password/protection semantics are intentionally frozen in the core.
     # reuse_password/store_plain_start_value/new_password are validated here but not forwarded.
 
-    decoded_source = _decode_capsule_for_core(source_capsule)
-    legacy_plaintext_warning = bool(decoded_source.pop("legacy_plaintext_ignored", False))
+    legacy_plaintext_warning = bool(source.legacy_plaintext_ignored)
     warnings: List[str] = []
     if legacy_plaintext_warning:
         warnings.append(LEGACY_PLAINTEXT_WARNING)
 
-    source_rounds = int(decoded_source["rounds"])
+    source_rounds = int(source.rounds)
     combined_rounds = list(final_rounds) + [source_rounds]
     max_rounds = max(combined_rounds) if combined_rounds else source_rounds
     progress_start(token, max_rounds)
@@ -478,8 +484,8 @@ def workflow_clone(
     status = "failed"
     try:
         ensure_not_cancelled(token)
-        start_value_bytes = decoded_source.get("start_value")
-        start_value_protected = decoded_source.get("start_value_protected")
+        start_value_bytes = source.start_value
+        start_value_protected = source.start_value_protected
         if start_value_bytes is None:
             if not isinstance(start_value_protected, Mapping):
                 raise WorkflowError("Source capsule is missing the start value.")
@@ -489,7 +495,6 @@ def workflow_clone(
                 start_value_bytes = decrypt_start_value(start_value_protected, source_password)
             except ValueError as exc:
                 raise WorkflowError(str(exc)) from exc
-        decoded_source["start_value"] = start_value_bytes
 
         chunk_base = max_rounds
         chunk_size = max(1, chunk_base // 20) if chunk_base > 0 else 1
@@ -504,9 +509,9 @@ def workflow_clone(
         hash_n_source = hash_map.get(source_rounds)
         if hash_n_source is None:
             raise WorkflowError("Source capsule hash computation failed.")
-        secret_k = core_maker.xor_bytes(decoded_source["puzzle"], hash_n_source)
-        expected_checksum = decoded_source["secret_checksum"]
-        if hashlib.sha256(secret_k).digest() != expected_checksum:
+        secret_k = core_maker.xor_bytes(bytes(source.puzzle), hash_n_source)
+        expected_checksum = source.secret_checksum
+        if compute_secret_checksum(secret_k) != expected_checksum:
             raise WorkflowError("Source capsule checksum mismatch.")
 
         start_value_protected_override: Optional[Dict[str, Any]] = None
@@ -523,6 +528,18 @@ def workflow_clone(
             start_value_protected_override = core_maker.protect_start_value(start_value_bytes, decisions.new_password)
             password_required = True
 
+        source_payload = {
+            "format": source.format,
+            "version": source.version,
+            "mode": "clone",
+            "rounds": source_rounds,
+            "hash_function": source.hash_function,
+            "puzzle": bytes(source.puzzle),
+            "start_value": start_value_bytes,
+            "start_value_protected": start_value_protected,
+            "secret_checksum": expected_checksum,
+        }
+
         capsule_results: List[CapsuleResult] = []
         for round_value in decisions.rounds:
             ensure_not_cancelled(token)
@@ -531,7 +548,7 @@ def workflow_clone(
                 raise WorkflowError("Hash chain computation failed for requested round.")
             try:
                 capsule = clone_capsule_web(
-                    source=decoded_source,
+                    source=source_payload,
                     rounds=round_value,
                     progress_callback=None,
                     abort_check=None,
@@ -590,9 +607,11 @@ def workflow_unlock(
         raise WorkflowError("Missing puzzle data.")
 
     try:
-        rounds_value = int(request_data["rounds"])
-    except (KeyError, TypeError, ValueError) as exc:
+        rounds_value = request_data["rounds"]
+    except KeyError as exc:
         raise WorkflowError("Unlock request missing valid 'rounds'.") from exc
+    if not isinstance(rounds_value, int):
+        raise WorkflowError("Capsule corrupted or tampered")
     if rounds_value <= 0:
         raise WorkflowError("Rounds must be a positive integer.")
 
@@ -752,10 +771,6 @@ def _capsule_to_public_payload(capsule: CapsuleResult) -> Dict[str, Any]:
     return payload
 
 
-def _decode_capsule_for_core(payload: Mapping[str, Any]) -> Dict[str, Any]:
-    if not isinstance(payload, Mapping):
-        raise WorkflowError("Source capsule must be a mapping.")
-
     def _get_value(*keys: str) -> str | None:
         for key in keys:
             value = payload.get(key)
@@ -766,9 +781,11 @@ def _decode_capsule_for_core(payload: Mapping[str, Any]) -> Dict[str, Any]:
         return None
 
     try:
-        rounds_value = int(payload["rounds"])
-    except (KeyError, TypeError, ValueError) as exc:
+        rounds_value = payload["rounds"]
+    except KeyError as exc:
         raise WorkflowError("Invalid round information in source capsule.") from exc
+    if not isinstance(rounds_value, int):
+        raise WorkflowError("Capsule corrupted or tampered")
 
     puzzle_encoded = _get_value("puzzle_base64", "puzzle")
     checksum_hex = _get_value("secret_checksum_hex", "secret_checksum")
@@ -781,9 +798,9 @@ def _decode_capsule_for_core(payload: Mapping[str, Any]) -> Dict[str, Any]:
     legacy_plaintext_ignored = False
 
     try:
-        puzzle = base64.b64decode(puzzle_encoded)
+        puzzle = decode_puzzle_base64(puzzle_encoded)
     except (TypeError, ValueError) as exc:
-        raise WorkflowError("Source capsule contains invalid base64 data.") from exc
+        raise WorkflowError("Capsule corrupted or tampered") from exc
 
     start_value = None
     if start_value_encoded is not None:

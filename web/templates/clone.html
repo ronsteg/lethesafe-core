@@ -13,7 +13,7 @@
   </label>
   <label>
     Ursprungspasswort
-    <input type="password" name="password" id="clone-password-source"
+    <input type="password" name="ls_start_password" id="clone-password-source"
       placeholder="Leer lassen, falls keines vergeben wurde." autocomplete="new-password" autocapitalize="off"
       spellcheck="false" inputmode="verbatim" />
   </label>
@@ -42,7 +42,7 @@
       <p>Gewünschte Verzögerung: <strong id="clone-time-requested"></strong></p>
       <p>Gemessene Hashrate: <strong id="clone-time-hashrate"></strong></p>
       <p>Berechnete Rundenzahl: <strong id="clone-time-rounds"></strong></p>
-      <p>Geschätzte Laufzeit: <strong id="clone-time-runtime"></strong></p>
+      <div class="ls-runtime-breakdown" id="clone-time-runtime"></div>
       <label class="ls-inline">
         <input type="checkbox" id="clone-time-confirm" />
         Mit diesen Parametern klonen
@@ -68,13 +68,13 @@
     <p></p>
     <label>
       Neues Passwort
-      <input type="password" name="new_password" id="clone-password-new" placeholder="Neues Startpasswort"
+      <input type="password" name="ls_start_new_password" id="clone-password-new" placeholder="Neues Startpasswort"
         autocomplete="new-password" autocapitalize="off" spellcheck="false" inputmode="verbatim" />
     </label>
     <p></p>
     <label>
       Passwort wiederholen
-      <input type="password" name="new_password_confirm" id="clone-password-confirm" placeholder="Passwort wiederholen"
+      <input type="password" name="ls_start_new_password_confirm" id="clone-password-confirm" placeholder="Passwort wiederholen"
         autocomplete="new-password" autocapitalize="off" spellcheck="false" inputmode="verbatim" />
     </label>
   </div>

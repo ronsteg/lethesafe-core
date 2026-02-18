@@ -14,7 +14,6 @@ Kategorie B/C: Interaktion, Kalibrierung, Dateiausgabe, UX
 """
 
 import base64
-import hashlib
 import json
 import os
 import re
@@ -24,6 +23,7 @@ from datetime import datetime, timezone
 from getpass import getpass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+from common.puzzle_format import normalize_puzzle_payload, write_puzzle_v2_canonical
 from cli.version import __version__ as CLI_VERSION
 from core.version import __version__ as CORE_VERSION
 
@@ -42,9 +42,10 @@ from core.core_maker import (
 from core.core_unlocker import (
     decrypt_start_value,
     recover_secret_k,
+    compute_secret_checksum,
+    decode_puzzle_base64,
 )
 
-PUZZLE_VERSION = 2
 PROGRESS_ENABLED = os.environ.get("LETHESAFE_PROGRESS", "1").strip() != "0"
 
 
@@ -218,24 +219,46 @@ def write_text_file_no_prompt(path: Path, content: str) -> None:
     print(f"💾 Gespeichert: {path}")
 
 
-def format_secret_file(rounds: Sequence[int], secret_b64: str) -> str:
-    names = []
+def _collect_capsule_labels(rounds: Sequence[int]) -> List[str]:
+    labels: List[str] = []
+    seen: set[int] = set()
     for value in rounds:
         try:
             rounds_int = int(value)
         except (TypeError, ValueError):
             continue
-        if rounds_int <= 0:
+        if rounds_int <= 0 or rounds_int in seen:
             continue
-        names.append(f"zeitkapsel_{rounds_int}")
+        seen.add(rounds_int)
+        labels.append(f"zeitkapsel_{rounds_int}r")
+    return labels
+
+
+def format_secret_file(rounds: Sequence[int], secret_b64: str) -> str:
+    names = _collect_capsule_labels(rounds)
     if names:
         return f"Zielzeichenkette [K] der {', '.join(names)}:\n{secret_b64}\n"
     return f"Zielzeichenkette [K]:\n{secret_b64}\n"
 
 
-def write_json_canonical(path: Path, data: Dict[str, Any]) -> None:
-    text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
-    path.write_text(text, encoding="utf-8")
+def format_start_password_file(rounds: Sequence[int], password: str) -> str:
+    names = _collect_capsule_labels(rounds)
+    if names:
+        return f"Passwort der {', '.join(names)} für den Startwert [S]:\n{password}\n"
+    return f"Passwort für den Startwert [S]:\n{password}\n"
+
+
+def build_meta_payload(shared: Dict[str, Any], capsule_meta: Dict[str, Any]) -> Dict[str, Any]:
+    meta: Dict[str, Any] = {}
+    for key, value in shared.items():
+        if key == "mode":
+            continue
+        if value is not None:
+            meta[key] = value
+    for key, value in capsule_meta.items():
+        if value is not None:
+            meta[key] = value
+    return meta
 
 
 # ─────────────────────────────────────────────
@@ -424,8 +447,8 @@ def load_existing_capsule() -> Tuple[Path, Dict[str, Any]]:
         except Exception as exc:
             print(f"🚫 Fehler beim Lesen der Zeitkapsel-Datei: {exc}")
             continue
-        normalized = _normalize_capsule_fields(data)
-        if "puzzle" not in normalized or "rounds" not in normalized:
+        normalized = normalize_puzzle_payload(data)
+        if "puzzle_base64" not in normalized or "rounds" not in normalized:
             print("🚫 Ungültige Zeitkapsel-Datei (Felder fehlen).")
             continue
         return path, normalized
@@ -457,21 +480,8 @@ def resolve_start_value_from_data(data: Dict[str, Any]) -> bytes:
 
 
 def build_capsule_filename(prefix: str, rounds: int) -> Path:
-    base = Path.cwd() / f"{prefix}_{rounds}r-Zeitkapsel.json"
+    base = Path.cwd() / f"{prefix}_Zeitkapsel_{rounds}r.json"
     return unique_export_filename(base)
-
-
-def _normalize_capsule_fields(data: Dict[str, Any]) -> Dict[str, Any]:
-    normalized = dict(data)
-    alias_pairs = (
-        ("puzzle", "puzzle_base64"),
-        ("start_value", "start_value_base64"),
-        ("secret_checksum", "secret_checksum_hex"),
-    )
-    for canonical, alias in alias_pairs:
-        if canonical not in normalized and alias in normalized:
-            normalized[canonical] = normalized[alias]
-    return normalized
 
 
 # ─────────────────────────────────────────────
@@ -507,8 +517,11 @@ def main() -> None:
 
     if is_clone:
         source_path, source_data = load_existing_capsule()
-        source_rounds = int(source_data["rounds"])
-        source_puzzle = base64.b64decode(source_data["puzzle"])
+        source_rounds = source_data["rounds"]
+        if not isinstance(source_rounds, int):
+            raise ValueError("Capsule corrupted or tampered")
+        source_puzzle = decode_puzzle_base64(source_data["puzzle_base64"])
+        source_meta = source_data.get("meta") or {}
 
         # Startwert S (inkl. Passwortprompt) – MUSS vor Hashlauf passieren
         start_value = resolve_start_value_from_data(source_data)
@@ -519,8 +532,8 @@ def main() -> None:
 
         # Schutzstrategie für neue Kapseln festlegen – MUSS vor Hashlauf passieren
         source_protected = source_data.get("start_value_protected")
-        inherited_protection = source_data.get("start_value_protection")
-        inherited_iterations = source_data.get("start_value_iterations")
+        inherited_protection = source_meta.get("start_value_protection")
+        inherited_iterations = source_meta.get("start_value_iterations")
 
         if source_protected and ask_yes_no("🔐 Originalen Passwortschutz für [S] beibehalten?", default=True):
             start_value_payload = {"start_value_protected": source_protected}
@@ -572,7 +585,7 @@ def main() -> None:
             "💾 Soll die Zielzeichenkette [K] in eine Datei geschrieben werden?",
             "lethesafe",
             "_k-key",
-            ".b64",
+            ".txt",
             "Dateiname (Zielzeichenkette)",
         )
 
@@ -593,7 +606,7 @@ def main() -> None:
         secret = recover_secret_k(
             source_puzzle,
             Hn,
-            secret_checksum=source_data.get("secret_checksum"),
+            secret_checksum=source_data.get("secret_checksum_hex"),
             hash_function=source_data.get("hash_function")
         )
         secret_b64 = base64.b64encode(secret).decode("ascii")
@@ -604,34 +617,40 @@ def main() -> None:
         # Hashes für neue Kapseln (stumm; Core)
         hashes = {int(r): hash_results[int(r)] for r in rounds_list}
 
-        checksum = hashlib.sha256(secret).hexdigest()
+        checksum = compute_secret_checksum(secret).hex()
         written: List[Path] = []
 
         for idx, r in enumerate(rounds_list, start=1):
             out_path = build_capsule_filename(prefix, r)
             puzzle_bytes = build_puzzle(secret, hashes[r])
+            puzzle_b64 = base64.b64encode(puzzle_bytes).decode("ascii")
 
-            payload: Dict[str, Any] = {
-                "format": "lethesafe-puzzle",
-                "version": PUZZLE_VERSION,
-                "hash_function": "sha256",
+            core_fields: Dict[str, Any] = {
+                "mode": metadata_shared["mode"],
                 "rounds": int(r),
-                "puzzle": base64.b64encode(puzzle_bytes).decode("ascii"),
-                "created": utc_timestamp(),
-                **metadata_shared,
-                "capsule_index": idx,
-                "capsule_rounds": int(r),
-                "secret_checksum": checksum,
+                "puzzle_base64": puzzle_b64,
+                "secret_checksum_hex": checksum,
                 **start_value_payload,
             }
+            meta_payload = build_meta_payload(
+                metadata_shared,
+                {
+                    "created": utc_timestamp(),
+                    "capsule_index": idx,
+                    "capsule_rounds": int(r),
+                },
+            )
 
-            write_json_canonical(out_path, payload)
+            write_puzzle_v2_canonical(out_path, core_fields, meta=meta_payload or None)
             print(f"✅ Zeitkapsel-Datei gespeichert: {out_path.name}")
             written.append(out_path)
 
         # Exporte (ohne Prompt)
         if export_start_pw_path and start_password_to_save:
-            write_text_file_no_prompt(export_start_pw_path, start_password_to_save)
+            write_text_file_no_prompt(
+                export_start_pw_path,
+                format_start_password_file(rounds_list, start_password_to_save),
+            )
 
         if export_k_path:
             write_text_file_no_prompt(export_k_path, format_secret_file(rounds_list, secret_b64))
@@ -703,7 +722,7 @@ def main() -> None:
         "💾 Soll die Zielzeichenkette [K] in eine Datei geschrieben werden?",
         "lethesafe",
         "_k-key",
-        ".b64",
+        ".txt",
         "Dateiname (Zielzeichenkette)",
     )
 
@@ -713,34 +732,39 @@ def main() -> None:
     hashes = compute_hash_targets(start_value, rounds_list)
     if PROGRESS_ENABLED:
         print("✅ Hashkettenlauf abgeschlossen.")
-    checksum = hashlib.sha256(secret).hexdigest()
+    checksum = compute_secret_checksum(secret).hex()
 
     written: List[Path] = []
     for idx, r in enumerate(rounds_list, start=1):
         out_path = build_capsule_filename(prefix, r)
         puzzle_bytes = build_puzzle(secret, hashes[r])
 
-        payload: Dict[str, Any] = {
-            "format": "lethesafe-puzzle",
-            "version": PUZZLE_VERSION,
-            "hash_function": "sha256",
+        core_fields = {
+            "mode": metadata_shared["mode"],
             "rounds": int(r),
-            "puzzle": base64.b64encode(puzzle_bytes).decode("ascii"),
-            "created": utc_timestamp(),
-            **metadata_shared,
-            "capsule_index": idx,
-            "capsule_rounds": int(r),
-            "secret_checksum": checksum,
+            "puzzle_base64": base64.b64encode(puzzle_bytes).decode("ascii"),
+            "secret_checksum_hex": checksum,
             **start_value_payload,
         }
+        meta_payload = build_meta_payload(
+            metadata_shared,
+            {
+                "created": utc_timestamp(),
+                "capsule_index": idx,
+                "capsule_rounds": int(r),
+            },
+        )
 
-        write_json_canonical(out_path, payload)
+        write_puzzle_v2_canonical(out_path, core_fields, meta=meta_payload or None)
         print(f"✅ Zeitkapsel-Datei gespeichert: {out_path.name}")
         written.append(out_path)
 
     # Exporte (ohne weitere Prompts, aber im NEW-Modus wäre es egal – wir halten es sauber)
     if export_start_pw_path and start_password_to_save:
-        write_text_file_no_prompt(export_start_pw_path, start_password_to_save)
+        write_text_file_no_prompt(
+            export_start_pw_path,
+            format_start_password_file(rounds_list, start_password_to_save),
+        )
 
     if export_k_path:
         write_text_file_no_prompt(export_k_path, format_secret_file(rounds_list, secret_b64))

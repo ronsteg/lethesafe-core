@@ -82,6 +82,71 @@ artifacts before use.
 
 
 # Releases  
+
+## 1.1.0 (2026-02-18)
+
+### Architecture & Hardening Phase
+
+This release consolidates the canonical puzzle format,
+enforces strict cryptographic boundaries,
+and introduces fail-closed validation behavior.
+
+No changes were made to the time-lock construction,
+delay semantics, or cryptographic primitives.
+
+---
+
+### Core v1.1.0
+
+- Strict integer enforcement for `rounds` and `iterations`
+- Removal of implicit type casting
+- Exact algorithm identifier enforcement
+- Strict Base64 length validation for critical fields
+- Strict checksum normalization and digest-length validation
+- Unified fail-closed error model
+- Hash-chain execution restricted exclusively to the core layer
+
+---
+
+### CLI v1.1.0
+
+- Removal of cryptographic logic from frontend layer
+- Strict capsule validation parity with core
+- Unified artifact output format (`.txt`)
+- Stable clone workflow without post-start interaction prompts
+
+---
+
+### Web v1.1.0
+
+- Strict capsule validation parity with core
+- JSON-only structured error responses
+- Removal of frontend-side cryptographic execution
+- Unified artifact output format (`.txt`)
+- Corrected clone progress calculation
+
+Progress in clone mode is now calculated against the
+maximum required round target rather than clone-local
+round subsets, ensuring mathematically continuous
+sequential progress visualization.
+
+---
+
+### Documentation
+
+- Whitepaper formal versioning introduced (Version 1.0)
+- Clarified separation between model specification and reference implementation
+
+---
+
+### Unchanged
+
+- Sequential SHA-256 hash-chain construction
+- XOR-based secret binding
+- PBKDF2-HMAC-SHA256 password protection
+- Time-lock irreversibility guarantees
+
+
 ## 1.0.2 (2026-02-07)
 
 ### Changes
