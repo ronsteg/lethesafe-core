@@ -1,4 +1,4 @@
-# Lethesafe Core
+# Lethesafe® Core
 
 This repository contains the open-source core of the Lethesafe project.
 
@@ -59,3 +59,11 @@ unbreakable or immune to failure.
 ## License
 
 GNU Affero General Public License v3 (AGPLv3)
+
+
+## Trademark Notice
+
+Lethesafe® is a registered trademark of Ronald Stegmiller.
+
+The source code is licensed under the GNU Affero General Public License v3 (AGPLv3).
+Forks and derivative works are permitted under the AGPLv3, but may not use the name "Lethesafe" without permission.
